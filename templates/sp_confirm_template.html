@@ -1,0 +1,35 @@
+<html>
+  <head>
+    <title>ICB</title>
+  </head>
+
+  <body>
+    <style type="text/css">
+      th{font-size : 14;border : 1px solid black;}
+      td{font-size : 14;align : center;}
+    </style>
+
+    {% if logo_cid %}<img src="cid:{{ logo_cid }}" width="60" height="60" alt="ICB"><br><br>{% endif %}
+    <b>
+      Dear Account Holder<br>
+      Sale/Purchase Confirmation Statement is given bellow<br><br>
+    </b>
+
+    <table cellspacing="0" width="650">
+	  <tr>
+	    <th align="center" width="30">Account No.</th>
+		<th align="center" width="370">Company Name</th>
+		<th align="center" width="100">Date</th>
+		<th align="center" width="60">Transaction</th>
+		<th align="center" width="60">No. Of Shares</th>
+		<th align="center" width="30">Rate</th>
+      </tr>
+      {% for transaction in transactions %}
+        <tr>
+          <td align="center">{{ transaction[0] }}</td><td>{{ transaction[1] }}</td><td align="center">{{ transaction[2] }}</td>
+          <td align="center">{{ transaction[3] }}</td><td align="center">{{ transaction[5] }}</td><td align="center">{{ transaction[4] }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  </body>
+</html>

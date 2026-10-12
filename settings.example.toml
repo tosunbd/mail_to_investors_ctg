@@ -1,0 +1,70 @@
+# ============================================================================
+#  ICB Investors' Department, Chattogram Branch - investor email service
+#  TEMPLATE: copy this file to settings.toml and fill in your values.
+#  settings.toml is private (git-ignored). Passwords live in .env, never here.
+# ============================================================================
+
+[database]
+# Oracle 10g branch database
+# Branch database server address (ask the branch IT officer)
+host         = "0.0.0.0"
+port         = 1521
+service_name = ""              # empty = connect by SID (as the legacy module did)
+sid          = "orcl"
+# "thick" = uses Oracle Instant Client 11.2 (REQUIRED for Oracle 10g / 11g).
+# "thin"  = no client needed, but only works with Oracle 12.1 or newer.
+mode         = "thick"
+client_dir   = "oracle_client/instantclient_11_2"   # Windows; on Linux run.sh sets LD_LIBRARY_PATH
+connect_retries             = 3
+connect_retry_delay_seconds = 10
+
+[smtp]
+host     = "smtp.bcc.gov.bd"    # = 43.229.13.207
+port     = 587
+security = "starttls"           # starttls | ssl | none
+# What investors see in the From field. The login account (SMTP_USER in .env)
+# is used as the envelope sender, exactly like the legacy module.
+from_address = "No Reply <no-reply@icb.gov.bd>"
+timeout_seconds = 120
+# The relay throttles fast senders: keep one connection, pause between mails,
+# and take a breather after each batch.
+delay_between_emails_ms = 400
+batch_size              = 300
+batch_pause_seconds     = 60
+max_retries                 = 5
+retry_initial_delay_seconds = 2
+retry_max_delay_seconds     = 30
+
+[portfolio]
+subject         = "Portfolio Statement From ICB"   # "{account}" is replaced by the account number
+attachment_name = "Portfolio.pdf"
+include_logo    = true
+
+[sale_purchase]
+subject      = "Sale/Purchase Confirmation From ICB"
+include_logo = true
+
+[run]
+# Safety switches - both must be off for a real send.
+dry_run        = false   # true = build everything but send nothing (.eml files are saved)
+
+# >>> TEST MODE SWITCH (see TEST_MODE_INSTRUCTIONS.txt) <<<
+#   test_recipient = "you@example.com"        -> TEST: only the FIRST account that has a
+#                                                statement is sent, to this address, then STOP.
+#   test_recipient = ""                       -> LIVE: every investor gets their own email.
+#   ("null" or "none" also mean LIVE.)
+test_recipient  = "your.test.address@example.com"
+test_max_emails = 1      # how many test emails before stopping (1 = first account only)
+
+# Re-running the same day never sends an account the same email twice.
+skip_already_sent_today = true
+# If set, a summary with the run report is emailed here after every run.
+admin_email = ""
+# PDFs and dry-run .eml files older than this are deleted automatically.
+keep_output_days = 60
+
+[paths]
+templates = "templates"
+assets    = "assets"
+output    = "output"
+logs      = "logs"

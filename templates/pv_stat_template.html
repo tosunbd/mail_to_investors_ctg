@@ -1,0 +1,143 @@
+<html>
+  <head>
+    <title>ICB</title>
+  </head>
+
+  <body>
+    <style type="text/css">
+    @page {
+	     size: legal landscape;
+	     margin: 1cm;
+     }
+      sptab{padding-left: 9em;}
+      tabl{padding-left: 2em;}
+      tabr{padding-right: 2em;}
+      spcl{padding-left: 1em;}
+      spcr{padding-right:1em;}
+      th{font-size : 14;border : 1px solid black;}
+      td{font-size : 14;align : center;}
+      h1{font-family: Helvetica, Geneva, Arial,SunSans-Regular, sans-serif }
+    </style>
+
+    <center>
+      {% if logo_cid %}<img src="cid:{{ logo_cid }}" width="70" height="70" alt="ICB"><br>{% endif %}
+      <font size="2">
+        <b>
+          INVESTMENT CORPORATION OF BANGLADESH<br>
+          {{profiles[4]}}<br>
+          INVESTORS' DEPARTMENT<br><br>
+          Portfolio Satemant<br>
+          (With Avg.Cost Price & Market Price)<br><br>
+        </b>
+      </font
+    </center>
+
+      <table>
+        {% if profiles %}
+
+          <tr>
+            <td align="center" colspan="5"><b>As On : {{profiles[2]}} </b></td>
+          </tr>
+          <tr>
+            <td align="right" width="5%">Name : </td><td align="left" width="70%"> {{profiles[1]}} </td>
+            <td align="right" width="10%">Account No. : </td><td align="left" width="10%"> {{profiles[0]}}</td>
+            <td align="left" width="5%">(Tk.)</td
+          </tr>
+
+        {% endif %}
+
+      </table>
+
+      <center>
+
+        <table class=custom id=data cellspacing="0" width="950">
+	      <tr>
+		    <th align="center" width="300">Company Name<br>1</th>
+		    <th align="center" width="50">Type<br>2</th>
+		    <th align="center" width="100">No. Of Shares<br>3</th>
+		    <th align="center" width="100">Avg. Cost<br>Price<br>4</th>
+		    <th align="center" width="100">Market<br>Price<br>5</th>
+		    <th align="center" width="100">Purchase Cost<br>(Total)<br>6</th>
+		    <th align="center" width="100">Market Value<br>(Total)<br>7</th>
+		    <th align="center" width="100"><br>Difference<br>(7-6)</th>
+		  </tr>
+
+          {% for transaction in transactions %}
+            <tr>
+              <td>{{ transaction[0] }}</td><td align="center">{{ transaction[1] }}</td>
+              <td align="right"> {{ transaction[2] }}</td>
+              <td align="right"> {{ transaction[3] }}</td><td align="right"> {{ transaction[4] }}</td>
+              <td align="right"> {{ transaction[5] }}</td><td align="right"> {{ transaction[6] }}</td>
+              <td align="right"> {{ transaction[7] }}</td>
+            </tr>
+
+          {% endfor %}
+
+        </table>
+
+      </center>
+
+    {% if sums %}
+
+      <TABLE class=custom cellspacing="0" width="950">
+
+      <tr>
+        <TD width="300" align="right">&nbsp;</TD>
+        <TD width="50" align="right">&nbsp;</TD>
+        <td colspan="6" width="600"><hr color="gray" size="1"></td>
+      </tr>
+
+      <TR>
+        <TD width="300" align="right">&nbsp;</TD>
+        <TD width="50" align="right">&nbsp;</TD>
+        <TD width="100" align="right">{{sums[0]}}</TD>
+        <TD width="100" align="right">&nbsp;</TD>
+        <TD width="100" align="right">&nbsp;</TD>
+        <TD width="100" align="right">{{sums[1]}}</TD>
+        <TD width="100" align="right">{{sums[2]}}</TD>
+        <TD width="100" align="right">{{sums[3]}}</TD>
+      </TR>
+
+      <tr >
+        <TD width="300" align="right">&nbsp;</TD>
+        <TD width="50" align="right">&nbsp;</TD>
+        <td colspan="6" width="600"><hr color="gray" size="1"></td>
+      </tr>
+
+    </TABLE>
+  {% endif %}
+
+    <center>
+
+      <table>
+	    {% if foters %}
+
+		  <tr>
+		    <td align="right" width="300" colspan="2">Max. Loan Limit : </td><td align="right" colspan="2"> {{foters[0]}} </td>
+			<td align="right" width="300" colspan="2"><b><u>As per control</b></u></td><td align="right" colspan="2">&nbsp;</td>
+		  </tr>
+		  <tr>
+	        <td align="right" colspan="2">Current Balance : </td><td align="right" colspan="2"> {{foters[1]}} </td>
+			<td align="right" colspan="2">Portfolio Value : </td><td align="right" colspan="2"> {{foters[3]}} </td>
+		  </tr>
+		  <tr>
+	        <td align="right" colspan="2">Portfolio Value(As per market) :</td><td align="right" colspan="2"> {{sums[2]}} </td>
+			<td align="right" colspan="2">Purchase Power : </td><td align="right" colspan="2"> {{foters[4]}} </td>
+		  </tr>
+		  <tr>
+			<td align="right" colspan="2">&nbsp;</td><td align="right" colspan="2">&nbsp;</td>
+			<td align="right" colspan="2">Margin : </td><td align="right" colspan="2"> {{foters[5]}} </td>
+		  </tr>
+		  <tr>
+			<td align="right" colspan="2">&nbsp;</td><td align="right" colspan="2">&nbsp;</td>
+			<td align="right" colspan="2">Sortfall : </td><td align="right" colspan="2"> {{foters[6]}} </td>
+		  </tr>
+
+		{% endif %}
+      </table>
+
+    </center>
+
+  </body>
+
+</html>

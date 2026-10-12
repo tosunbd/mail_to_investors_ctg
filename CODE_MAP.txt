@@ -1,0 +1,442 @@
+===============================================================================
+ CODE MAP  -  how the program works, how an email reaches an investor,
+              and how to change it safely
+ ICB Investors' Department, Chattogram Branch - investor email service
+===============================================================================
+
+ Contents
+   1. The big picture (one diagram)
+   2. Folder and file map
+   3. Start-up: from double-click to Python
+   4. The Portfolio Statement run, step by step
+   5. One account: the decision path inside _deliver()
+   6. How one email is built (MIME structure)
+   7. How the email leaves: Mailer.send() and retries
+   8. Sale/Purchase Confirmation: what is different
+   9. Data shapes: which column is where (tuple index table)
+  10. Switches: test mode, dry run, journal - who wins
+  11. HOW TO CHANGE THINGS (cookbook with exact places)
+  12. How to test after a change
+  13. Roadmap (next steps)
+
+ Function names are given as  file.py : Class.method  so you can find them
+ with Ctrl+F in any editor (VS Code recommended: open the whole folder).
+
+
+===============================================================================
+ 1. THE BIG PICTURE
+===============================================================================
+
+  send_portfolio_statements.bat            settings.toml  .env
+            |                                    |          |
+            v                                    v          v
+  scripts\run_job.bat  ---->  python -m icb_mailer portfolio
+                                     |
+                              cli.py : main()  ---- config.py : load_settings()
+                                     |
+                              cli.py : _run_job()
+                                     |
+          +--------------------------+---------------------------+
+          |                          |                           |
+   locking.py : RunLock       db.py : open_connection     mailer.py : Mailer
+   (only one run at a time)   (Oracle 10g, thick mode)    (one SMTP login)
+          |                          |                           |
+          |                  repository.py : OracleRepository    |
+          |                  (all SQL lives here)                |
+          |                          |                           |
+          +------------->  jobs.py : JobRunner.run()  <----------+
+                                     |
+                       for every account (one by one):
+                                     |
+                 +-------------------+--------------------+
+                 |                   |                    |
+        journal.py           pdf_portfolio.py       templates\*.html
+        "already sent        build the PDF          build the HTML body
+         today?"             (PollyReports)         (Jinja2)
+                 |                   |                    |
+                 +---------> jobs.py : _deliver() <-------+
+                                     |
+                         mailer.py : Mailer.send()  -->  smtp.bcc.gov.bd  -->  investor
+                                     |
+                         reporting.py : write_reports()
+                         output\reports\*.txt / *.xlsx, logs\email_to_investors_<date_time>.log
+
+
+===============================================================================
+ 2. FOLDER AND FILE MAP
+===============================================================================
+
+ mail_to_investors_ctg\
+ |
+ |-- *.bat                     what the user double-clicks (thin wrappers)
+ |     send_portfolio_statements.bat        -> job "portfolio"
+ |     send_sale_purchase_confirmations.bat -> job "sale-purchase"
+ |     check_connections.bat                -> command "check"
+ |     send_sample_email.bat                -> command "sample"
+ |     dry_run_portfolio.bat / dry_run_sale_purchase.bat -> job + --dry-run
+ |     setup_windows.bat                    -> one-time install
+ |-- scripts\run_job.bat       the ONE real launcher all .bat files call:
+ |                             checks .venv exists, runs Python, prints the
+ |                             result, pauses unless --auto
+ |-- run.sh / setup_linux.sh   the same for Linux
+ |
+ |-- settings.toml             all normal settings  (read on every start)
+ |-- .env                      passwords only       (read on every start)
+ |
+ |-- icb_mailer\               THE PROGRAM (Python package)
+ |     __main__.py             "python -m icb_mailer" starts here -> cli.main()
+ |     cli.py                  commands, options, exit codes, glue between parts
+ |     config.py               reads settings.toml + .env into Settings objects
+ |     db.py                   loads the Oracle client, connects (with retries)
+ |     repository.py           ALL SQL statements + functions that run them
+ |     jobs.py                 THE MAIN LOGIC: loops over accounts, decides,
+ |                             builds and sends each email
+ |     pdf_portfolio.py        the Portfolio Statement PDF layout
+ |     mailer.py               SMTP connection, pacing, retries, address checks
+ |     journal.py              remembers who was sent what today (SQLite)
+ |     locking.py              prevents two runs at the same time
+ |     reporting.py            the TXT / Excel report after each run
+ |     log_setup.py            console + logs\email_to_investors_<date_time>.log
+ |     vendor\PollyReports.py  small report engine used for the PDF (do not edit)
+ |
+ |-- templates\
+ |     pv_stat_template.html   HTML body of the Portfolio Statement email
+ |     sp_confirm_template.html HTML body of the Sale/Purchase email
+ |-- assets\icb_logo.jpg       logo used in PDF and emails
+ |-- oracle_client\instantclient_11_2\   32-bit Oracle client (do not touch)
+ |-- tests\                    automatic tests (sample data + fake mail server)
+ |-- installers\, wheels\      offline installation files
+ |
+ |-- output\   (created at run time)
+ |     pdf\<date>\<account>.pdf            copy of each PDF
+ |     dry_run\<job>_<date>_<time>\*.eml   emails from dry runs
+ |     reports\<job>_<date>_<time>.txt/.xlsx   result of every run
+ |     state\sent_journal.sqlite3          "already sent today" memory
+ |     state\<job>.lock                    lock file of a running job
+ |-- logs\email_to_investors_<date_time>.log  one log per run + AUDIT "not sent" table
+
+
+===============================================================================
+ 3. START-UP: FROM DOUBLE-CLICK TO PYTHON
+===============================================================================
+
+ 1) send_portfolio_statements.bat
+       cd to its own folder, then:  call scripts\run_job.bat portfolio %*
+ 2) scripts\run_job.bat
+       - looks for "--auto" in the arguments (scheduler mode = no pause)
+       - if .venv\Scripts\python.exe is missing -> "run setup_windows.bat"
+       - runs:  .venv\Scripts\python.exe -m icb_mailer portfolio [options]
+       - translates the exit code into a message (0/1/2/3), pauses
+ 3) icb_mailer\__main__.py  ->  cli.py : main()
+       a) _parser() reads the command line (portfolio / sale-purchase /
+          check / sample, plus --dry-run --test-to --accounts --limit
+          --force --auto -v)
+       b) config.py : load_settings()
+            - settings.toml  -> DatabaseSettings, SmtpSettings, JobSettings,
+                                RunSettings, Paths
+            - .env           -> DB_USER, DB_PASSWORD, SMTP_USER, SMTP_PASSWORD
+              (a real environment variable with the same name wins)
+            - any mistake -> "CONFIGURATION ERROR ..." and exit code 2
+       c) log_setup.py : setup_logging()  -> screen + logs\email_to_investors_<date_time>.log
+       d) chooses: _check(), _sample() or _run_job("portfolio" | "sale_purchase")
+
+
+===============================================================================
+ 4. THE PORTFOLIO STATEMENT RUN, STEP BY STEP
+===============================================================================
+
+ cli.py : _run_job()
+   4.1  Build RunOptions from command line + settings.toml:
+          dry_run, test_recipient, accounts, limit, force, test_max_emails
+          (command line wins over settings.toml)
+   4.2  RunLock(output\state\portfolio.lock)
+          another run active? -> "Another run ... in progress", exit code 3
+   4.3  purge_old_output()  deletes PDF / dry-run folders older than
+          keep_output_days
+   4.4  SentJournal(output\state\sent_journal.sqlite3) opened
+   4.5  db.py : open_connection()
+          init_client(): checks oci.dll is 32-bit like Python, loads the
+                         Oracle 11.2 client (thick mode)
+          connect():     makedsn(host, port, service_name) + login,
+                         3 retries for network errors, NO retry for a
+                         wrong password (ORA-01017) to avoid locking it
+   4.6  mailer.py : Mailer.__enter__() -> connect()  (skipped in dry run)
+          SMTP connect, STARTTLS, login ONCE for the whole run.
+          Login failing 3 times -> SmtpLoginError -> run stops, exit code 2
+   4.7  jobs.py : JobRunner(...).run()  ->  _run_portfolio()
+
+ jobs.py : JobRunner._run_portfolio()
+   4.8  repository : portfolio_profiles()
+          SQL_PORTFOLIO_PROFILES -> one row per investor having an email:
+          (account, name, as-on date, email, branch)
+   4.9  _select(rows)
+          --accounts given  -> keep only those (unknown ones are reported)
+          --limit N         -> keep the first N
+          test mode         -> remembers "stop after test_max_emails"
+   4.10 template pv_stat_template.html is loaded once
+   4.11 FOR EACH profile row, in account-number order:
+          - prepares a small function build(to) that knows how to make
+            THIS account's email (it runs only if the account passes the
+            checks in _deliver, so no PDF is made for skipped accounts)
+          - calls _deliver(...)   -> see section 5
+          - after it: _test_cap_reached()? (test mode) -> stop the loop
+
+ build(to) for the portfolio (inside _run_portfolio):
+          holdings    = repository.portfolio_holdings(account)
+                        SQL_PORTFOLIO_HOLDINGS  (EMAIL_PV_STAT_DATA)
+                        no rows -> return None  -> status NO DATA
+          footer      = repository.portfolio_footer(account)
+                        SQL_PORTFOLIO_FOOTER -> (raw numbers, to_char text)
+          sums        = repository.portfolio_sums(account)
+          pdf bytes   = pdf_portfolio.build_portfolio_pdf(profile, holdings,
+                                                          footer_text, logo)
+                        also saved to output\pdf\<date>\<account>.pdf
+          html        = template.render(profiles=profile, transactions=holdings,
+                                        foters=footer_raw, sums=sums, logo_cid)
+          plain text  = short "Dear Account Holder ..." fallback text
+          message     = _message(...)  + PDF attached as "Portfolio.pdf"
+
+ back in cli.py : _run_job()
+   4.12 reporting.py : write_reports()  -> output\reports\portfolio_<stamp>.txt/.xlsx
+   4.13 optional summary email to admin_email
+   4.14 exit code: 0 all good / 1 some failed / 2 aborted
+
+
+===============================================================================
+ 5. ONE ACCOUNT: THE DECISION PATH INSIDE jobs.py : JobRunner._deliver()
+===============================================================================
+
+   raw email from DB  --split_addresses()-->  valid list + invalid list
+   ("a@x.com; b@y.com" -> both used, junk ignored and noted in the report)
+                |
+   [A] Real send (not dry run, not test mode, not --force) AND
+       skip_already_sent_today = true AND journal says "sent today"?
+                |-- yes --> status ALREADY SENT TODAY ........... STOP
+                v no
+   [B] Who receives it?
+         test mode           -> to = [test_recipient]   (investor ignored)
+         else valid address  -> to = the investor's address(es)
+         else                -> status INVALID EMAIL ................ STOP
+                v
+   [C] build(to)  (database queries, PDF, HTML, message)
+         returns None        -> status NO DATA ...................... STOP
+                v
+   [D] Dry run?
+         yes -> save output\dry_run\...\<account>.eml, status DRY RUN .. STOP
+                v no
+   [E] Mailer.send(message)
+         ok                  -> status SENT
+                                journal.record()  (NOT in test mode)
+                                pause after every batch_size emails
+         PermanentSendError  -> status FAILED (bad address etc.), continue
+         other error         -> status FAILED, continue;
+                                10 failures in a row -> RunAborted, whole
+                                run stops (something systemic is wrong)
+         SmtpLoginError      -> whole run stops
+
+   Every path adds exactly one ResultRow -> one line in the report.
+
+
+===============================================================================
+ 6. HOW ONE EMAIL IS BUILT  (jobs.py : _message, mailer.py : new_message)
+===============================================================================
+
+   Headers: From = settings.toml [smtp] from_address  ("No Reply <no-reply@icb.gov.bd>")
+            To, Subject ([portfolio] subject; "{account}" is replaced),
+            Date, Message-ID, Auto-Submitted
+   Envelope sender (MAIL FROM) = SMTP_USER from .env
+
+   multipart/mixed
+   |-- multipart/alternative
+   |     |-- text/plain            short fallback text
+   |     |-- multipart/related
+   |           |-- text/html       templates\pv_stat_template.html rendered
+   |           |-- image/jpeg      assets\icb_logo.jpg  (cid: ... in the HTML)
+   |-- application/pdf "Portfolio.pdf"      (portfolio job only)
+
+
+===============================================================================
+ 7. HOW THE EMAIL LEAVES: mailer.py : Mailer.send()
+===============================================================================
+
+   _pace()  waits so that at least delay_between_emails_ms passes between mails
+   send_message() on the SAME connection opened at the start
+   errors:
+     4xx (temporary, "try again later")  -> drop connection, wait
+                                            2s, 4s, 8s ... (max 30s), retry
+                                            up to max_retries times
+     5xx recipient refused (550 ...)     -> PermanentSendError, no retry
+     connection dropped / timeout        -> reconnect + login, retry
+   maybe_pause_for_batch(): after every batch_size mails, disconnect and
+   sleep batch_pause_seconds (the BCC relay throttles fast senders).
+
+
+===============================================================================
+ 8. SALE/PURCHASE CONFIRMATION: WHAT IS DIFFERENT
+===============================================================================
+
+   jobs.py : _run_sale_purchase()   (same _deliver, same Mailer)
+     recipients   = repository.sale_purchase_recipients()   SQL_SP_RECIPIENTS
+                    (accounts that have rows in V_SALE_BUY_CONFIRMATION)
+     build(to):   transactions = sale_purchase_transactions(account)
+                  html from templates\sp_confirm_template.html
+                  plain-text table fallback
+                  NO PDF attachment
+
+
+===============================================================================
+ 9. DATA SHAPES - WHICH COLUMN IS WHERE
+===============================================================================
+ Rows are tuples; the templates and the PDF read them BY POSITION.
+ If you change a SELECT, you must change every place that reads that index.
+
+ profile  (SQL_PORTFOLIO_PROFILES)            used in
+   [0] accnt_no                               key, PDF, template profiles[0]
+   [1] name (+ " (JOINT)")                    PDF, template profiles[1]
+   [2] date dd/mm/rrrr                        "As On", template profiles[2]
+   [3] email_no                               recipient
+   [4] branch name                            PDF header, template profiles[4]
+
+ holding  (SQL_PORTFOLIO_HOLDINGS)  -> template transactions[i][n], PDF key=n
+   [0] COMPANY_NAME  [1] TYPE  [2] NO_OF_SHARES  [3] AVG_COST_PRICE
+   [4] MARKET_PRICE  [5] PURCHASE_COST  [6] MARKET_VALUE  [7] DIFFERENCE
+
+ footer   (SQL_PORTFOLIO_FOOTER) - first 7 = numbers (HTML "foters"),
+                                   next 7 = to_char text (PDF)
+   [0] MAX_LOAN_LIMIT  [1] CURRENT_BALANCE  [2] PORTFOLIO_VALUE_MARKET
+   [3] PORTFOLIO_VALUE_CONTROL  [4] PURCHASE_POWER  [5] MARGIN  [6] SORTFALL
+
+ sums     (SQL_PORTFOLIO_SUMS) -> template sums[n]
+   [0] shares  [1] purchase cost  [2] market value  [3] difference
+
+ sale/purchase transaction (SQL_SP_TRANSACTIONS) -> template transaction[n]
+   [0] ACCNT_NO  [1] COMP_NM  [2] SP_DATE  [3] TR_CD  [4] RATE  [5] QUANTITY
+
+
+===============================================================================
+ 10. SWITCHES - WHO WINS
+===============================================================================
+
+                         who gets the email    recorded in journal?  stops early?
+ normal (live)           investor              yes                   no
+ test_recipient set      test address          NO                    after test_max_emails
+   + --accounts 1234     test address          NO                    no (only those accounts)
+ dry_run / --dry-run     nobody (.eml saved)   NO                    no (unless test mode too)
+ --force                 investor, even if     yes                   no
+                         already sent today
+
+ Command-line options override settings.toml for that run only.
+
+
+===============================================================================
+ 11. HOW TO CHANGE THINGS  (cookbook)
+===============================================================================
+ Rule of thumb: settings.toml / .env / templates need NO programming.
+ Anything in icb_mailer\*.py: make a copy of the folder first, then run the
+ tests (section 12) and a dry run before sending for real.
+
+ --- No programming --------------------------------------------------------
+ Database server / service      settings.toml [database] host, port, service_name (or sid)
+ Database user / password       .env  DB_USER, DB_PASSWORD
+ Mail login                     .env  SMTP_USER, SMTP_PASSWORD
+ Mail server / port / TLS       settings.toml [smtp] host, port, security
+ Sender shown to investors      settings.toml [smtp] from_address
+ Email subject                  settings.toml [portfolio] subject
+                                ("{account}" -> account number, e.g.
+                                 "Portfolio Statement A/C {account}")
+ PDF file name                  settings.toml [portfolio] attachment_name
+ Logo on/off                    settings.toml include_logo = true/false
+ Replace the logo               overwrite assets\icb_logo.jpg (square JPG)
+ Sending speed                  settings.toml delay_between_emails_ms,
+                                batch_size, batch_pause_seconds
+ Test / live                    settings.toml test_recipient (TEST_MODE_INSTRUCTIONS.txt)
+ Report by email after runs     settings.toml admin_email
+ How long PDFs are kept         settings.toml keep_output_days
+ Email wording / layout         templates\pv_stat_template.html,
+                                templates\sp_confirm_template.html
+                                (plain HTML + {{ ... }} placeholders,
+                                 {% if %} / {% for %} blocks; keep them)
+
+ --- Small code changes ----------------------------------------------------
+ Plain-text fallback wording    jobs.py : _run_portfolio  -> variable "plain"
+                                jobs.py : _run_sale_purchase -> "lines"
+ Change a SQL query             repository.py : SQL_... constants.
+                                Keep the same number and ORDER of columns,
+                                or update every index listed in section 9.
+                                Always use bind variables (:acc), never
+                                glue values into the SQL text.
+ Add a column to the email      1) add it at the END of the SELECT in
+                                   repository.py (so old indexes stay)
+                                2) use it in the template, e.g.
+                                   {{ transaction[8] }}
+ Add a column to the PDF        pdf_portfolio.py : _detail_band() add
+                                Element((x, 0), ("Times-Roman", 8), key=8, ...)
+                                and a heading in _page_header(); x = points
+                                from the left margin (page width ~540)
+ Move / restyle PDF text        pdf_portfolio.py : _page_header (top part),
+                                _detail_band (each row), _report_footer
+                                (totals + loan/margin block).
+                                Positions are (x, y) in points (1/72 inch).
+ Number format in the PDF       pdf_portfolio.py : _int_fmt, _money_fmt
+ Only certain accounts always   add  and i.br_cd = ...  (or similar) to
+                                SQL_PORTFOLIO_PROFILES
+ "already sent" rule            journal.py (per job + account + day);
+                                switch off: skip_already_sent_today = false
+ Abort threshold                jobs.py : MAX_CONSECUTIVE_FAILURES
+
+ --- Bigger changes --------------------------------------------------------
+ One email per address with all its accounts (like the head-office .NET app):
+   in _run_portfolio, group the profile rows by email first, build one PDF
+   per account, attach all of them to one message, record every account in
+   the journal. _deliver() stays the same.
+ A new email type (e.g. Financial Statement - the old fin_stat_template.html):
+   1) template in templates\
+   2) SQL + methods in repository.py (and in the Repository Protocol, and
+      in tests\fakes.py FakeRepository)
+   3) a _run_xxx() method in jobs.py modelled on _run_sale_purchase(),
+      a new job key + JOB_TITLES entry, and [xxx] section in settings.toml
+      + JobSettings in config.py
+   4) a sub-command in cli.py : _parser() and a .bat file
+   5) tests in tests\test_service.py
+ Database upgraded to Oracle 12c or newer later:
+   settings.toml  mode = "thin" -> no Oracle client, 64-bit Python possible,
+   and oracledb may then be upgraded in requirements.txt.
+
+
+===============================================================================
+ 12. HOW TO TEST AFTER A CHANGE
+===============================================================================
+ 1) Automatic tests (no database, no real mail - takes ~10 seconds):
+      .venv\Scripts\python -m unittest discover -s tests -t . -v
+    All must say "ok". If you changed a column order, update tests\fakes.py.
+ 2) send_sample_email.bat           -> layout check in your own mailbox
+ 3) dry_run_portfolio.bat           -> real data, nothing sent; open .eml/PDF
+ 4) test_recipient = your address   -> one real email to yourself
+ 5) test_recipient = ""             -> live
+ Logs: logs\email_to_investors_<date_time>.log. Results: output\reports\.
+
+
+===============================================================================
+ 13. ROADMAP
+===============================================================================
+ Phase 1 - Go live (now)
+   [ ] setup_windows.bat on the branch PC, "ALL CHECKS PASSED"
+   [ ] confirm the DB address and SID in settings.toml (check_connections.bat -> Database: OK)
+   [ ] send_sample_email.bat reaches you@example.com
+   [ ] test mode with real data, compare with an old statement
+   [ ] test_recipient = "" and first live run; read the report
+ Phase 2 - Automate
+   [ ] Task Scheduler entries (SETUP_AND_SCHEDULER_GUIDE.txt part 3)
+   [ ] admin_email set, so every scheduled run mails its report
+   [ ] put the project in git (GitLab, like the .NET project); .env is
+       already excluded by .gitignore
+ Phase 3 - Improve
+   [ ] one email per address for investors with several accounts
+   [ ] fix the old wording in templates if wanted ("Satemant", "Sortfall",
+       "bellow") - they were kept on purpose to match the old format
+   [ ] Financial Statement job from fin_stat_template.html (section 11)
+ Phase 4 - Platform
+   [ ] when the database moves to Oracle 12c+, switch to thin mode, 64-bit
+       Python and the newest oracledb; remove oracle_client\
+   [ ] optionally run on a Linux server (guide part 4) with cron/systemd
+===============================================================================

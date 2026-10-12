@@ -1,0 +1,13 @@
+# Keep Windows batch files CRLF and shell scripts LF whatever the checkout OS.
+* text=auto
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.sh   text eol=lf
+*.py   text eol=lf
+*.toml text eol=lf
+*.jpg  binary
+*.png  binary
+*.pdf  binary
+*.dll  binary
+*.exe  binary
+*.whl  binary

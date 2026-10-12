@@ -1,0 +1,98 @@
+===============================================================================
+ TEST MODE  -  send the first statement to yourself, then switch to LIVE
+===============================================================================
+
+ There is ONE switch, in the file  settings.toml  (open it with Notepad),
+ in the [run] section:
+
+     test_recipient  = "you@example.com"
+     test_max_emails = 1
+
+ TEST MODE  (how it is delivered now)
+     test_recipient = "you@example.com"
+     -> The program reads the real data from the database, takes the FIRST
+        account that has a statement, emails that statement (HTML + PDF)
+        to you@example.com, and STOPS. No investor receives anything.
+        (Accounts with no data are skipped, so you always get a real PDF.)
+     -> test_max_emails = 3 would send the first 3 statements to you.
+
+ LIVE MODE  (send to all investors)
+     test_recipient = ""
+     -> Every investor with an email address gets their own statement.
+        ("null" or "none" between the quotes also mean LIVE.)
+
+ Keep the quotes and save the file (Ctrl+S). No restart or reinstall is
+ needed - the setting is read every time a .bat file is started.
+
+
+-------------------------------------------------------------------------------
+ STEP-BY-STEP CHECK  (do this once, and again after any change)
+-------------------------------------------------------------------------------
+
+ Step 0 - one-time install (skip if already done)
+     Double-click  setup_windows.bat
+     It ends with the connection check. "RESULT: ALL CHECKS PASSED" = good.
+
+ Step 1 - mail server only (no database, no investor)
+     Double-click  send_sample_email.bat
+     -> One statement built from SAMPLE data (accounts 1001 "MD. RAHIM UDDIN"
+        etc. - not real investors) is mailed to the test_recipient address.
+        The subject starts with "[SAMPLE - test data]".
+     -> Open the test mailbox. Not in the Inbox? Look in Spam / Promotions, and mark it
+        "Not spam".
+     Check: the ICB logo at the top, the table, the totals, and the
+            attachment "Portfolio.pdf".
+
+ Step 2 - database + mail, real data, still only to you
+     a) Make sure settings.toml says   test_recipient = "you@example.com"
+     b) Double-click  send_portfolio_statements.bat
+        The window shows "WARNING TEST MODE ..." lines, sends ONE
+        email and prints  "TEST MODE: 1 test email(s) done - stopping."
+     c) Check the email in the test mailbox as in step 1, now with real data.
+     d) Same for the confirmation:  send_sale_purchase_confirmations.bat
+        (sends only if there are trades in V_SALE_BUY_CONFIRMATION today).
+
+     Want to test one particular account instead of the first one?
+     Open a Command Prompt in the project folder and run:
+        .venv\Scripts\python -m icb_mailer portfolio --accounts 1234
+     (with test mode on, it goes to the test address, not to the investor)
+
+ Step 3 - optional: look at everything without sending anything
+     Double-click  dry_run_portfolio.bat
+     -> All emails are built and saved in output\dry_run\portfolio_<date>_<time>\
+        as <account>.eml (double-click to open in Outlook / Windows Mail),
+        PDFs in output\pdf\<date>\. Nothing is sent to anybody.
+
+ Step 4 - go LIVE
+     a) In settings.toml change the line to:   test_recipient = ""
+     b) Save.
+     c) Double-click send_portfolio_statements.bat  (or let the Task
+        Scheduler run it - see SETUP_AND_SCHEDULER_GUIDE.txt).
+     d) Afterwards check output\reports\portfolio_<date>_<time>.txt
+        (or the .xlsx) - every account is listed with SENT / FAILED / ...
+
+ To redo the test later: put the address back (step 2a) and repeat.
+ Test emails are NOT recorded as "sent", so the live run afterwards still
+ sends to every investor, including the account used in the test.
+
+
+-------------------------------------------------------------------------------
+ IF SOMETHING GOES WRONG
+-------------------------------------------------------------------------------
+
+ "SMTP server ... closed the connection during login"
+ "SMTP login rejected ... 535"
+     The mail server did not accept SMTP_USER + SMTP_PASSWORD from .env.
+     1. Check SMTP_PASSWORD in the .env file (Notepad). Log in to the
+        webmail with the same address and password to be sure.
+     2. Too many failed tries make the server block this PC for a while
+        (it then does not answer at all: "timed out"). Wait 15-30 minutes
+        before trying again. The program itself stops after 3 login tries.
+     3. If the password is right and it still fails, ask the BCC/ICB mail
+        administrator whether the SMTP_USER account may send via
+        smtp.bcc.gov.bd port 587 from this PC.
+
+ "DATABASE: ..."            -> see PART 5 of SETUP_AND_SCHEDULER_GUIDE.txt
+ "Another run ... in progress" -> wait for the other window to finish.
+ Test mailbox shows nothing -> check Spam; then the newest logs\email_to_investors_*.log, the
+                               last lines show exactly what happened.

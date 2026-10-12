@@ -1,0 +1,274 @@
+===============================================================================
+ ICB INVESTORS' DEPARTMENT, CHATTOGRAM BRANCH - INVESTOR EMAIL SERVICE
+ Setup, daily use and automatic scheduling (Windows and Linux)
+===============================================================================
+
+ What it does
+ ------------
+ * Portfolio Statement      : emails every investor who has an email address
+                              the statement as an HTML message + PDF attachment
+                              ("Portfolio.pdf"), same format as the old module.
+ * Sale/Purchase Confirmation: emails each investor with trades in
+                              invest.V_SALE_BUY_CONFIRMATION a confirmation table.
+
+ Mail is sent through smtp.bcc.gov.bd:587 logged in as the SMTP_USER account from .env.
+ Nobody is asked for a login: the credentials are in the .env file.
+
+
+===============================================================================
+ PART 1 - ONE-TIME SETUP ON WINDOWS
+===============================================================================
+
+ Requirements: Windows 8.1 or newer (10/11 recommended), network access to
+ the branch Oracle server and to smtp.bcc.gov.bd.
+
+ 1. Copy the whole "mail_to_investors_ctg" folder to the PC, e.g.
+        D:\ICB\mail_to_investors_ctg
+    (any folder works; spaces in the path are fine)
+
+ 2. Check the two settings files with Notepad:
+        settings.toml  - database server address, mail server, subjects ...
+        .env           - DB_USER / DB_PASSWORD / SMTP_USER / SMTP_PASSWORD
+    IMPORTANT: confirm in settings.toml that
+        host = "<DB server IP>" service_name = ""   sid = "orcl"
+    are the Chattogram branch database (the PC must be on the branch network).
+    Test from Command Prompt:
+        powershell -Command "Test-NetConnection <DB server IP> -Port 1521"
+    (must show TcpTestSucceeded : True). Change them if not.
+
+ 3. Double-click  setup_windows.bat
+    It will, by itself:
+      - find 32-bit Python 3.12, or install it from installers\ if missing
+      - create a private environment (.venv) - nothing else on the PC changes
+      - install the libraries from the wheels\ folder (no internet needed)
+      - run a connection check of the database and the mail server
+    The last screen must say  "RESULT: ALL CHECKS PASSED".
+
+ Why 32-bit Python?
+    The database is Oracle 10g. The only Oracle client that can still talk to
+    10g and works with modern Python is Instant Client 11.2, and the copy we
+    have (oracle_client\instantclient_11_2) is 32-bit. Python and the client
+    must have the same bitness. This is handled automatically by the setup.
+    Do NOT upgrade the "oracledb" library beyond 3.4.x while the database is
+    10g (newer versions refuse the 11.2 client).
+
+
+===============================================================================
+ PART 2 - DAILY USE (one click)
+===============================================================================
+
+   send_portfolio_statements.bat         -> sends the Portfolio Statements
+   send_sale_purchase_confirmations.bat  -> sends the Sale/Purchase Confirmations
+   check_connections.bat                 -> tests DB + mail server, sends nothing
+   dry_run_portfolio.bat                 -> builds everything, sends NOTHING
+   dry_run_sale_purchase.bat             -> builds everything, sends NOTHING
+
+ After every run you get:
+   output\reports\<job>_<date>_<time>.txt   printable list: account, status, email
+   output\reports\<job>_<date>_<time>.xlsx  the same in Excel (failures in red)
+   output\pdf\<date>\<account>.pdf          a copy of every PDF that was sent
+   logs\email_to_investors_<date_time>.log  one log per run; ends with the AUDIT
+                                            table of emails NOT sent (from, to, reason)
+
+ Status values in the report
+   SENT                 email accepted by the mail server
+   ALREADY SENT TODAY   skipped: this account already got today's email
+   NO DATA              nothing to send for this account (no holdings / trades)
+   INVALID EMAIL        no email address, or it is not a valid address
+   FAILED               could not be sent (the reason is shown)
+   DRY RUN (not sent)   dry run only
+
+ Safe to run again
+   If a run stops half way (power cut, network drop, window closed), just run
+   it again: accounts that already received TODAY's email are skipped, so no
+   investor gets a duplicate. To deliberately resend, see "--force" below.
+   Two runs of the same job can never run at the same time (the second one
+   stops immediately with "Another run ... is still in progress").
+
+ Before the first real send (recommended)
+   1. Double-click dry_run_portfolio.bat, then open a few files from
+      output\dry_run\portfolio_<date>_<time>\  (double-click a .eml file -
+      it opens in Outlook/Windows Mail) and the PDFs in output\pdf\<date>\.
+   2. Send a few REAL emails to yourself only - open a Command Prompt in the
+      folder and run:
+        .venv\Scripts\python -m icb_mailer portfolio --test-to your.name@icb.gov.bd --accounts 1234,5678
+      (without --accounts only the first 3 accounts are used in test mode)
+
+ Useful options (add after the job name, or after the .bat name)
+   --dry-run                 build everything, send nothing
+   --test-to ADDRESS         send every email to ADDRESS instead of investors
+   --accounts 101,102,103    only these accounts
+   --limit 50                only the first 50 accounts
+   --force                   resend even if already sent today
+   --auto                    no "Press any key" at the end (for the scheduler)
+   -v                        more detail on screen
+   Example:  send_portfolio_statements.bat --accounts 1001,1002
+
+ Exit codes (Task Scheduler "Last Run Result" / cron)
+   0 = all good   1 = some emails failed   2 = stopped by an error
+   3 = another run was still in progress
+
+ Optional: get the report by email after every run
+   In settings.toml set   admin_email = "admin@example.com"   (any address)
+
+
+===============================================================================
+ PART 3 - AUTOMATIC SCHEDULE ON WINDOWS (Task Scheduler)
+===============================================================================
+
+ Always add  --auto  so the window closes by itself when done.
+ Replace D:\ICB\mail_to_investors_ctg with your real folder.
+
+ A) Using the mouse
+   1. Start menu -> "Task Scheduler" -> right pane "Create Task..."
+   2. General tab
+        Name: ICB - Sale Purchase Confirmation
+        Select "Run whether user is logged on or not"
+        Tick   "Run with highest privileges" is NOT needed.
+   3. Triggers tab -> New...
+        Weekly, tick Sunday, Monday, Tuesday, Wednesday, Thursday,
+        start time e.g. 16:30   (after the day's trades are posted)
+   4. Actions tab -> New...
+        Action  : Start a program
+        Program : D:\ICB\mail_to_investors_ctg\send_sale_purchase_confirmations.bat
+        Add arguments : --auto
+        Start in      : D:\ICB\mail_to_investors_ctg
+   5. Settings tab
+        Tick "Run task as soon as possible after a scheduled start is missed"
+        "Stop the task if it runs longer than": 4 hours
+        "If the task is already running": Do not start a new instance
+   6. OK -> enter the Windows password of the account when asked.
+
+   Repeat for the Portfolio Statement, e.g. Monthly, day 1, 10:00, with
+        Program : D:\ICB\mail_to_investors_ctg\send_portfolio_statements.bat
+        Add arguments : --auto
+
+ B) Using one command (Command Prompt "Run as administrator")
+
+   schtasks /Create /F /TN "ICB\Sale Purchase Confirmation" ^
+     /TR "\"D:\ICB\mail_to_investors_ctg\send_sale_purchase_confirmations.bat\" --auto" ^
+     /SC WEEKLY /D SUN,MON,TUE,WED,THU /ST 16:30 /RU "%USERDOMAIN%\%USERNAME%" /RP *
+
+   schtasks /Create /F /TN "ICB\Portfolio Statement" ^
+     /TR "\"D:\ICB\mail_to_investors_ctg\send_portfolio_statements.bat\" --auto" ^
+     /SC MONTHLY /D 1 /ST 10:00 /RU "%USERDOMAIN%\%USERNAME%" /RP *
+
+   ("/RP *" asks for the Windows password so the task runs while logged off.)
+   Other schedules:  /SC DAILY /ST 17:00     or   /SC WEEKLY /D THU /ST 17:00
+
+   Test it now   : schtasks /Run /TN "ICB\Portfolio Statement"
+   See status    : schtasks /Query /TN "ICB\Portfolio Statement" /V /FO LIST
+   Remove        : schtasks /Delete /TN "ICB\Portfolio Statement" /F
+
+ The PC must be switched on (not sleeping) at the scheduled time, and the
+ Windows account used must be able to read/write the project folder.
+
+
+===============================================================================
+ PART 4 - LINUX (server) SETUP AND SCHEDULE
+===============================================================================
+
+ Supported: any 64-bit Linux (Ubuntu 20.04+, RHEL/Oracle Linux 8+). The
+ Linux path has not been tried on a real server yet - run the check first.
+
+ 1. Copy the project folder, e.g. to /opt/icb_mailer
+       sudo mkdir -p /opt/icb_mailer && sudo chown $USER /opt/icb_mailer
+       (copy everything; the folders installers\ wheels\ and
+        oracle_client\instantclient_11_2 are Windows-only and can be skipped)
+
+ 2. Python 3.12
+       Ubuntu 24.04 : sudo apt install python3.12 python3.12-venv
+       Ubuntu 22.04 : sudo add-apt-repository ppa:deadsnakes/ppa && \
+                      sudo apt install python3.12 python3.12-venv
+       RHEL/OL 8-9  : sudo dnf install python3.12
+
+ 3. Oracle Instant Client 11.2 for Linux x86-64 (needed for Oracle 10g)
+       Download "instantclient-basic-linux.x64-11.2.0.4.0.zip" from
+       https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html
+       (version 11.2.0.4 is in the older-versions list; a free Oracle
+       account login is required). Then:
+         cd /opt/icb_mailer/oracle_client
+         unzip instantclient-basic-linux.x64-11.2.0.4.0.zip
+         mv instantclient_11_2 instantclient_11_2_linux
+       It needs libaio:
+         Ubuntu 24.04 : sudo apt install libaio1t64 && \
+                        sudo ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
+         older Ubuntu : sudo apt install libaio1
+         RHEL/OL      : sudo dnf install libaio
+
+ 4. Install and test
+       cd /opt/icb_mailer
+       chmod +x setup_linux.sh run.sh
+       ./setup_linux.sh            (ends with the connection check)
+       chmod 600 .env              (only you can read the passwords)
+
+ 5. Run by hand
+       ./run.sh portfolio
+       ./run.sh sale-purchase
+       ./run.sh portfolio --dry-run
+       ./run.sh portfolio --test-to your.name@icb.gov.bd --accounts 1001
+
+ 6. Schedule with cron:  crontab -e   and add (server time zone = Asia/Dhaka):
+
+       # Sale/Purchase Confirmation - Sunday to Thursday at 16:30
+       30 16 * * 0-4  /opt/icb_mailer/run.sh sale-purchase --auto >> /opt/icb_mailer/logs/cron.log 2>&1
+       # Portfolio Statement - 1st of every month at 10:00
+       0 10 1 * *     /opt/icb_mailer/run.sh portfolio --auto     >> /opt/icb_mailer/logs/cron.log 2>&1
+
+    (Check the server clock:  timedatectl ; set with
+       sudo timedatectl set-timezone Asia/Dhaka)
+
+    Alternative - systemd timer (survives reboots, catches up missed runs):
+      /etc/systemd/system/icb-portfolio.service
+          [Unit]
+          Description=ICB Portfolio Statement emails
+          After=network-online.target
+          [Service]
+          Type=oneshot
+          User=icbmail
+          WorkingDirectory=/opt/icb_mailer
+          ExecStart=/opt/icb_mailer/run.sh portfolio --auto
+      /etc/systemd/system/icb-portfolio.timer
+          [Unit]
+          Description=Monthly ICB Portfolio Statement
+          [Timer]
+          OnCalendar=*-*-01 10:00:00
+          Persistent=true
+          [Install]
+          WantedBy=timers.target
+      then:  sudo systemctl daemon-reload && sudo systemctl enable --now icb-portfolio.timer
+             systemctl list-timers ; journalctl -u icb-portfolio
+
+
+===============================================================================
+ PART 5 - TROUBLESHOOTING
+===============================================================================
+
+ "Oracle client ... is 32-bit but Python is 64-bit"
+     Run setup_windows.bat again (it recreates .venv with 32-bit Python).
+ "DPI-1047: Cannot locate a 32-bit Oracle Client library" / missing MSVCR80.dll
+     The 11.2 client needs the Microsoft Visual C++ 2005 SP1 Redistributable
+     (x86). Install "vcredist_x86.exe" (2005 SP1) from Microsoft.
+ "ORA-12541: TNS:no listener" / "ORA-12170: timeout"
+     Wrong host/port in settings.toml, or the network/firewall blocks 1521.
+ "ORA-12514: listener does not currently know of service"
+     Use the right service_name, or set service_name = "" and sid = "ORCL".
+ "ORA-01017: invalid username/password"
+     Fix DB_USER / DB_PASSWORD in .env.
+ "SMTP login rejected ... 535"
+     Fix SMTP_USER / SMTP_PASSWORD in .env. (The program tries at most 3
+     times so the mailbox does not get locked.)
+ "4.7.1 Service unavailable - try again later" in the log
+     The relay is throttling. The program already retries; if it is
+     frequent, raise delay_between_emails_ms (e.g. 1000) in settings.toml.
+ Some investors say they did not get the email
+     Look the account up in output\reports\... - the STATUS column shows
+     exactly what happened. Resend one:
+         send_portfolio_statements.bat --accounts 1234 --force
+
+ Where to change things
+     Subjects, sender name, pacing, schedule-safety switches -> settings.toml
+     Passwords                                             -> .env
+     Email body layout                                     -> templates\*.html
+     PDF layout                                            -> icb_mailer\pdf_portfolio.py
+     SQL queries                                           -> icb_mailer\repository.py

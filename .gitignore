@@ -1,0 +1,51 @@
+# ---------------------------------------------------------------------------
+#  Private / local files - NEVER commit these to a public repository
+# ---------------------------------------------------------------------------
+# Secrets (database + mail passwords) and the real configuration.
+# Public templates are .env.example and settings.example.toml.
+.env
+.env.*
+!.env.example
+settings.toml
+settings.local.toml
+
+# Personal notes
+*.notes.txt
+
+# Run output: investor PDFs, .eml files, reports, sent journal, logs
+output/
+logs/
+*.log
+*.sqlite3
+*.eml
+*.lock
+
+# ---------------------------------------------------------------------------
+#  Third-party binaries - keep them on the PC, not in git
+# ---------------------------------------------------------------------------
+# Oracle Instant Client (Oracle licence; oraociei11.dll is over GitHub's 100 MB limit)
+oracle_client/
+# Python installer and offline wheels (download from python.org / PyPI)
+installers/
+wheels/
+
+# ---------------------------------------------------------------------------
+#  Python / editor
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store

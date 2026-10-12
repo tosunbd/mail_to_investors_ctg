@@ -1,0 +1,10 @@
+# Python 3.12 (32-bit on Windows, to match the bundled 32-bit Oracle Instant Client 11.2)
+#
+# oracledb is pinned to 3.4.x on purpose: it is the last release line that
+# accepts Oracle Client 11.2, and 11.2 is the newest client that can talk to
+# the Oracle 10g branch database. oracledb 26+ requires client 19+, which
+# cannot connect to 10g. Do NOT upgrade it while the database is 10g.
+oracledb==3.4.2
+reportlab==5.0.1
+Jinja2==3.1.6
+openpyxl==3.1.5
